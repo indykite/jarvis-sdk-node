@@ -21,6 +21,8 @@ import {
   StartDigitalTwinEmailVerificationResponse,
   StartForgottenPasswordFlowRequest,
   StartForgottenPasswordFlowResponse,
+  TokenIntrospectRequest,
+  TokenIntrospectResponse,
   VerifyDigitalTwinEmailRequest,
   VerifyDigitalTwinEmailResponse,
 } from '../../grpc/indykite/identity/v1beta1/identity_management_api';
@@ -65,6 +67,16 @@ beforeAll(async () => {
 
 afterEach(() => {
   jest.resetAllMocks();
+});
+
+describe('New client', () => {
+  it('New instance creation', () => {
+    jest.spyOn(IdentityClient, 'createInstance').mockImplementation((): Promise<IdentityClient> => {
+      return Promise.resolve() as unknown as Promise<IdentityClient>;
+    });
+    IdentityClient.newClient(userToken);
+    expect(IdentityClient.createInstance).toBeCalledWith(userToken);
+  });
 });
 
 describe('Digital Twin', () => {
@@ -207,6 +219,12 @@ describe('Digital Twin', () => {
   });
 
   it('Read - Failure', async () => {
+    const dt = {
+      id: parse(v4()),
+      tenantId: parse(v4()),
+      kind: DigitalTwinKind.DIGITAL_TWIN_KIND_PERSON,
+      state: DigitalTwinState.DIGITAL_TWIN_STATE_ACTIVE,
+    } as DigitalTwin;
     const mockResponse: GetDigitalTwinResponse = {};
     const mockErr = { code: Status.NOT_FOUND, details: 'DETAILS', metadata: {} } as ServiceError;
     const mockFunc = jest.fn(
@@ -223,7 +241,33 @@ describe('Digital Twin', () => {
 
     jest.spyOn(sdk['client'], 'getDigitalTwin').mockImplementation(mockFunc);
 
-    const resp = sdk.getDigitalTwinByToken(userToken, ['email']);
+    let resp = sdk.getDigitalTwinByToken(userToken, ['email']);
+    expect(mockFunc).toHaveBeenCalled();
+    expect(resp).rejects.toEqual(mockErr);
+
+    resp = sdk.getDigitalTwin(dt.id, dt.tenantId, ['email']);
+    expect(mockFunc).toBeCalledTimes(2);
+    expect(resp).rejects.toEqual(mockErr);
+  });
+
+  it('Token introspection - Error', async () => {
+    const mockResponse: TokenIntrospectResponse = { active: false };
+    const mockErr = { code: Status.NOT_FOUND, details: 'DETAILS', metadata: {} } as ServiceError;
+    const mockFunc = jest.fn(
+      (
+        request: TokenIntrospectRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: TokenIntrospectResponse) => void),
+      ): SurfaceCall => {
+        if (typeof callback === 'function') callback(mockErr, mockResponse);
+        return {} as SurfaceCall;
+      },
+    );
+
+    jest.spyOn(sdk['client'], 'tokenIntrospect').mockImplementation(mockFunc);
+
+    const resp = sdk.introspectToken('token');
     expect(mockFunc).toHaveBeenCalled();
     expect(resp).rejects.toEqual(mockErr);
   });
@@ -302,11 +346,39 @@ describe('Digital Twin', () => {
     }
   });
 
+  it('Patch Properties - short token error', () => {
+    const mockFunc = jest.fn(
+      (
+        request: PatchDigitalTwinRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: PatchDigitalTwinResponse) => void),
+      ): SurfaceCall => {
+        if (typeof callback === 'function') callback(null, {} as PatchDigitalTwinResponse);
+        return {} as SurfaceCall;
+      },
+    );
+
+    jest.spyOn(sdk['client'], 'patchDigitalTwin').mockImplementation(mockFunc);
+    const dt = new sdkTypes.DigitalTwin(v4(), v4(), 1, 1, new Date());
+    try {
+      sdk.patchPropertiesByToken('short token', dt);
+    } catch (err) {
+      expect(mockFunc).not.toBeCalled();
+      expect(err).toHaveProperty('message', 'Token must be 32 chars or more.');
+    }
+  });
+
   it('Patch Properties - errors', () => {
     [
       {
         svcerr: null,
         err: new SdkError(SdkErrorCode.SDK_CODE_1, 'Missing patch response'),
+        res: {} as PatchDigitalTwinResponse,
+      },
+      {
+        svcerr: { code: Status.UNAUTHENTICATED, details: '', metadata: {} } as ServiceError,
+        err: null,
         res: {} as PatchDigitalTwinResponse,
       },
     ].forEach((clb) => {
@@ -326,11 +398,11 @@ describe('Digital Twin', () => {
       const dt = new sdkTypes.DigitalTwin(v4(), v4(), 1, 1, new Date());
       let resp = sdk.patchPropertiesByToken(userToken, dt);
       expect(mockFunc).toBeCalled();
-      expect(resp).rejects.toEqual(clb.err);
+      expect(resp).rejects.toEqual(clb.err || clb.svcerr);
 
       resp = sdk.patchProperties(v4(), v4(), dt);
       expect(mockFunc).toBeCalledTimes(2);
-      expect(resp).rejects.toEqual(clb.err);
+      expect(resp).rejects.toEqual(clb.err || clb.svcerr);
     });
   });
 
@@ -499,6 +571,125 @@ describe('Digital Twin', () => {
       expect(mockFunc).toBeCalled();
       if (clb.expected) expect(resp).resolves.toBeTruthy();
       else expect(resp).rejects.toEqual(clb.err);
+    });
+  });
+
+  it('change password by token - bad token', async () => {
+    const mockFunc = jest.fn(
+      (
+        request: ChangePasswordRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: ChangePasswordResponse) => void),
+      ): SurfaceCall => {
+        if (typeof callback === 'function') callback(null, {});
+        return {} as SurfaceCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'changePassword').mockImplementation(mockFunc);
+    try {
+      await sdk.changePasswordByToken('BAD TOKEN', 'pwd');
+      expect(true).toBeFalsy();
+    } catch (error) {
+      expect((error as Error).message).toEqual('Token must be 32 chars or more.');
+    }
+  });
+
+  it('change password by token - true / false', () => {
+    const clbs = [
+      { err: null, res: {}, expected: true },
+      {
+        err: null,
+        res: {
+          error: { code: '5' },
+        },
+        expected: false,
+      },
+      {
+        err: { code: Status.NOT_FOUND, details: 'no details', metadata: {} } as ServiceError,
+        res: {},
+        expected: false,
+      },
+    ];
+
+    clbs.forEach((clb) => {
+      const mockFunc = jest.fn(
+        (
+          request: ChangePasswordRequest,
+          callback:
+            | Metadata
+            | ((error: ServiceError | null, response: ChangePasswordResponse) => void),
+        ): SurfaceCall => {
+          if (typeof callback === 'function') callback(clb.err, clb.res);
+          return {} as SurfaceCall;
+        },
+      );
+      jest.spyOn(sdk['client'], 'changePassword').mockImplementation(mockFunc);
+
+      const resp = sdk.changePasswordByToken(userToken, 'newpwd');
+      expect(mockFunc).toBeCalled();
+      if (clb.expected) expect(resp).resolves.toBeTruthy();
+      else expect(resp).rejects.toEqual(clb.err || clb.res.error);
+    });
+  });
+
+  it('change password - bad digital twin', async () => {
+    const error = new Error('Bad digital twin id') as ServiceError;
+    const mockFunc = jest.fn(
+      (
+        request: ChangePasswordRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: ChangePasswordResponse) => void),
+      ): SurfaceCall => {
+        if (typeof callback === 'function') callback(error, {});
+        return {} as SurfaceCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'changePassword').mockImplementation(mockFunc);
+    try {
+      await sdk.changePassword(v4(), v4(), 'newpwd');
+      expect(true).toBeFalsy();
+    } catch (thrownError) {
+      expect(thrownError).toEqual(error);
+    }
+  });
+
+  it('change password - true / false', () => {
+    const clbs = [
+      { err: null, res: {}, expected: true },
+      {
+        err: null,
+        res: {
+          error: { code: '5' },
+        },
+        expected: false,
+      },
+      {
+        err: { code: Status.NOT_FOUND, details: 'no details', metadata: {} } as ServiceError,
+        res: {},
+        expected: false,
+      },
+    ];
+
+    clbs.forEach((clb) => {
+      const mockFunc = jest.fn(
+        (
+          request: ChangePasswordRequest,
+          callback:
+            | Metadata
+            | ((error: ServiceError | null, response: ChangePasswordResponse) => void),
+        ): SurfaceCall => {
+          if (typeof callback === 'function') callback(clb.err, clb.res);
+          return {} as SurfaceCall;
+        },
+      );
+      jest.spyOn(sdk['client'], 'changePassword').mockImplementation(mockFunc);
+
+      const resp = sdk.changePassword(v4(), v4(), 'newpwd');
+      expect(mockFunc).toBeCalled();
+      if (clb.expected) expect(resp).resolves.toBeTruthy();
+      else expect(resp).rejects.toEqual(clb.err || clb.res.error);
     });
   });
 
