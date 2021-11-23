@@ -13,10 +13,11 @@ import {
   UpdateConfigNodeRequest,
   UpdateConfigNodeResponse,
 } from '../../grpc/indykite/config/v1beta1/config_management_api';
-import { EmailDefinition } from '../../grpc/indykite/config/v1beta1/model';
+import { AuthFlowConfig, EmailDefinition } from '../../grpc/indykite/config/v1beta1/model';
 import { ConfigClient } from '../config';
 import { SdkError, SdkErrorCode } from '../error';
 import { EmailMessage, SendgridEmailProvider } from '../model';
+import { AuthFlow } from '../model/config/authflow/flow';
 import { EmailTemplate } from '../model/config/email/template';
 
 let sdk: ConfigClient;
@@ -115,6 +116,38 @@ describe('Email Configuration', () => {
 
     expect(mockFunc).toBeCalled();
     expect(resp).toEqual({ ...mockResp });
+  });
+});
+
+describe('Email Configuration - Error', () => {
+  it('Create Sendgrid Provider', async () => {
+    const mockResp = CreateConfigNodeResponse.fromJSON({
+      id: parse(v4()),
+      etag: new String(Date.now()),
+      createTime: new Date(),
+      updateTime: new Date(),
+    });
+    const mockError = { message: 'Configuration error' } as ServiceError;
+    const mockFunc = jest.fn(
+      (
+        request: CreateConfigNodeRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: CreateConfigNodeResponse) => void),
+      ): ClientUnaryCall => {
+        if (typeof callback === 'function') callback(mockError, mockResp);
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'createConfigNode').mockImplementation(mockFunc);
+
+    const resp = sdk.createEmailServiceConfiguration(
+      'gid:KAEyEGluZHlraURlgAAAAAAAAA8',
+      createSendgridObject(),
+    );
+
+    expect(mockFunc).toBeCalled();
+    expect(resp).rejects.toEqual(mockError);
   });
 });
 
@@ -257,6 +290,27 @@ describe('Read, Update, Delete - Email Configuration', () => {
     expect(resp).toEqual(expectedResp);
   });
 
+  it('Read - Missing config node', async () => {
+    const mockResp = ReadConfigNodeResponse.fromJSON({});
+    const mockFunc = jest.fn(
+      (
+        request: ReadConfigNodeRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: ReadConfigNodeResponse) => void),
+      ): ClientUnaryCall => {
+        if (typeof callback === 'function') callback(null, mockResp);
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'readConfigNode').mockImplementation(mockFunc);
+
+    const resp = sdk.readEmailServiceConfiguration(objectId);
+
+    expect(mockFunc).toBeCalled();
+    expect(resp).rejects.toHaveProperty('message', 'config_error_read_emailconfiguration');
+  });
+
   it('Read - Unsupported Provider', async () => {
     const mockResp = ReadConfigNodeResponse.fromJSON({
       configNode: {
@@ -387,6 +441,93 @@ describe('Read, Update, Delete - Email Configuration', () => {
     expect(resp).toEqual(sendgrid);
   });
 
+  it('Update - All configurations', async () => {
+    const sendgrid = createSendgridObject(false);
+    sendgrid.id = v4();
+    sendgrid.etag = 'eTag';
+    sendgrid.displayName = 'My Sendgrid';
+
+    const mockResp = UpdateConfigNodeResponse.fromJSON({
+      id: sendgrid.id,
+      etag: sendgrid.etag,
+      updateTime: new Date(),
+    });
+
+    const mockFunc = jest.fn(
+      (
+        request: UpdateConfigNodeRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: UpdateConfigNodeResponse) => void),
+      ): ClientUnaryCall => {
+        if (typeof callback === 'function') callback(null, mockResp);
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'updateConfigNode').mockImplementation(mockFunc);
+
+    const resp = await sdk.updateEmailServiceConfiguration(sendgrid);
+
+    expect(mockFunc).toBeCalled();
+    expect(resp).toEqual(sendgrid);
+  });
+
+  it('Update - Incorrect id', async () => {
+    const sendgrid = createSendgridObject(false);
+    sendgrid.id = v4();
+
+    const mockResp = UpdateConfigNodeResponse.fromJSON({
+      id: 'incorrect-id',
+      etag: sendgrid.etag,
+      updateTime: new Date(),
+    });
+
+    const mockFunc = jest.fn(
+      (
+        request: UpdateConfigNodeRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: UpdateConfigNodeResponse) => void),
+      ): ClientUnaryCall => {
+        if (typeof callback === 'function') callback(null, mockResp);
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'updateConfigNode').mockImplementation(mockFunc);
+
+    const resp = sdk.updateEmailServiceConfiguration(sendgrid);
+
+    expect(mockFunc).toBeCalled();
+    expect(resp).rejects.toHaveProperty(
+      'message',
+      `Update returned with different id: req.iq=${sendgrid.id}, res.id=${mockResp.id}`,
+    );
+  });
+
+  it('Update - Error', async () => {
+    const sendgrid = createSendgridObject(false);
+    sendgrid.id = v4();
+
+    const mockError = { message: 'Update error' } as ServiceError;
+    const mockFunc = jest.fn(
+      (
+        request: UpdateConfigNodeRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: UpdateConfigNodeResponse) => void),
+      ): ClientUnaryCall => {
+        if (typeof callback === 'function') callback(mockError, {} as UpdateConfigNodeResponse);
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'updateConfigNode').mockImplementation(mockFunc);
+
+    const resp = sdk.updateEmailServiceConfiguration(sendgrid);
+
+    expect(mockFunc).toBeCalled();
+    expect(resp).rejects.toEqual(mockError);
+  });
+
   it('Delete - True', async () => {
     const sendgrid = createSendgridObject();
     sendgrid.id = v4();
@@ -399,6 +540,7 @@ describe('Read, Update, Delete - Email Configuration', () => {
           | Metadata
           | ((error: ServiceError | null, response: DeleteConfigNodeResponse) => void),
       ): ClientUnaryCall => {
+        expect(request).toEqual({ id: sendgrid.id, etag: undefined });
         if (typeof callback === 'function') callback(null, mockResp);
         return {} as ClientUnaryCall;
       },
@@ -413,6 +555,7 @@ describe('Read, Update, Delete - Email Configuration', () => {
   it('Delete - False', async () => {
     const sendgrid = createSendgridObject();
     sendgrid.id = v4();
+    sendgrid.etag = 'eTag';
 
     const mockResp = DeleteConfigNodeResponse.fromJSON({});
     const mockFunc = jest.fn(
@@ -422,6 +565,7 @@ describe('Read, Update, Delete - Email Configuration', () => {
           | Metadata
           | ((error: ServiceError | null, response: DeleteConfigNodeResponse) => void),
       ): ClientUnaryCall => {
+        expect(request).toEqual({ id: sendgrid.id, etag: sendgrid.etag });
         if (typeof callback === 'function') {
           callback(
             { code: Status.NOT_FOUND, details: 'no details', metadata: {} } as ServiceError,
@@ -435,5 +579,168 @@ describe('Read, Update, Delete - Email Configuration', () => {
     const respFalse = sdk.deleteEmailServiceConfiguration(sendgrid);
     expect(mockFunc).toBeCalled();
     expect(respFalse).rejects.toEqual(false);
+  });
+
+  it('Create auth flow configuration - Error', async () => {
+    const mockResp = CreateConfigNodeResponse.fromJSON({});
+    const mockError = {
+      code: Status.NOT_FOUND,
+      details: 'no details',
+      metadata: {},
+    } as ServiceError;
+    const mockFunc = jest.fn(
+      (
+        request: CreateConfigNodeRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: CreateConfigNodeResponse) => void),
+      ): ClientUnaryCall => {
+        if (typeof callback === 'function') {
+          callback(mockError, mockResp);
+        }
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'createConfigNode').mockImplementation(mockFunc);
+    const resp = sdk.createAuthflowConfiguration('location', {
+      marshal: () => ({} as AuthFlowConfig),
+    } as AuthFlow);
+    expect(mockFunc).toBeCalled();
+    expect(resp).rejects.toEqual(mockError);
+  });
+
+  it('Read auth flow configuration - Error', async () => {
+    const mockResp = ReadConfigNodeResponse.fromJSON({});
+    const mockError = {
+      code: Status.NOT_FOUND,
+      details: 'no details',
+      metadata: {},
+    } as ServiceError;
+    const mockFunc = jest.fn(
+      (
+        request: ReadConfigNodeRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: ReadConfigNodeResponse) => void),
+      ): ClientUnaryCall => {
+        if (typeof callback === 'function') {
+          callback(mockError, mockResp);
+        }
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'readConfigNode').mockImplementation(mockFunc);
+    const resp = sdk.readAuthflowConfiguration('id');
+    expect(mockFunc).toBeCalled();
+    expect(resp).rejects.toEqual(mockError);
+  });
+
+  it('Read - Missing config node', async () => {
+    const mockResp = ReadConfigNodeResponse.fromJSON({});
+    const mockFunc = jest.fn(
+      (
+        request: ReadConfigNodeRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: ReadConfigNodeResponse) => void),
+      ): ClientUnaryCall => {
+        if (typeof callback === 'function') {
+          callback(null, mockResp);
+        }
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'readConfigNode').mockImplementation(mockFunc);
+    const resp = sdk.readAuthflowConfiguration('id');
+
+    expect(mockFunc).toBeCalled();
+    expect(resp).rejects.toHaveProperty('message', 'config_error_read_authflowconfiguration');
+  });
+
+  it('Update auth flow configuration - Error', async () => {
+    const config = {} as AuthFlow;
+    config.displayName = 'Display Name';
+    config.marshal = () => ({} as AuthFlowConfig);
+    const mockResp = UpdateConfigNodeResponse.fromJSON({});
+    const mockError = {
+      code: Status.NOT_FOUND,
+      details: 'no details',
+      metadata: {},
+    } as ServiceError;
+    const mockFunc = jest.fn(
+      (
+        request: UpdateConfigNodeRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: UpdateConfigNodeResponse) => void),
+      ): ClientUnaryCall => {
+        expect(request.displayName).toEqual(config.displayName);
+        if (typeof callback === 'function') {
+          callback(mockError, mockResp);
+        }
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'updateConfigNode').mockImplementation(mockFunc);
+    const resp = sdk.updateAuthflowConfiguration(config);
+    expect(mockFunc).toBeCalled();
+    expect(resp).rejects.toEqual(mockError);
+  });
+
+  it('Update auth flow configuration - Incorrect id', async () => {
+    const config = {} as AuthFlow;
+    config.id = '42';
+    config.displayName = 'Display Name';
+    config.marshal = () => ({} as AuthFlowConfig);
+    const mockResp = UpdateConfigNodeResponse.fromJSON({
+      id: 'incorrect-id',
+    });
+    const mockFunc = jest.fn(
+      (
+        request: UpdateConfigNodeRequest,
+        callback:
+          | Metadata
+          | ((error: ServiceError | null, response: UpdateConfigNodeResponse) => void),
+      ): ClientUnaryCall => {
+        expect(request.displayName).toEqual(config.displayName);
+        if (typeof callback === 'function') {
+          callback(null, mockResp);
+        }
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'updateConfigNode').mockImplementation(mockFunc);
+    const resp = sdk.updateAuthflowConfiguration(config);
+    expect(mockFunc).toBeCalled();
+    expect(resp).rejects.toHaveProperty(
+      'message',
+      `Update returned with different id: req.iq=${config.id}, res.id=${mockResp.id}`,
+    );
+  });
+
+  it('Delete auth flow configuration - Error', async () => {
+    const config = {} as AuthFlow;
+    config.etag = 'eTag';
+    const mockError = {
+      code: Status.NOT_FOUND,
+      details: 'no details',
+      metadata: {},
+    } as ServiceError;
+    const mockFunc = jest.fn(
+      (
+        request: DeleteConfigNodeRequest,
+        callback: Metadata | ((error: ServiceError | null) => void),
+      ): ClientUnaryCall => {
+        expect(request.etag).toEqual(config.etag);
+        if (typeof callback === 'function') {
+          callback(mockError);
+        }
+        return {} as ClientUnaryCall;
+      },
+    );
+    jest.spyOn(sdk['client'], 'deleteConfigNode').mockImplementation(mockFunc);
+    const resp = sdk.deleteAuthflowConfiguration(config);
+    expect(mockFunc).toBeCalled();
+    expect(resp).rejects.toEqual(false);
   });
 });
