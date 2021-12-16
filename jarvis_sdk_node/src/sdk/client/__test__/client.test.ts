@@ -5,6 +5,15 @@ import { SdkError, SdkErrorCode } from '../../error';
 
 jest.mock('fs');
 import * as fs from 'fs';
+import {
+  ChannelCredentials,
+  ClientOptions,
+  credentials,
+  Interceptor,
+  Metadata,
+} from '@grpc/grpc-js';
+import { LIB_VERSION } from '../../../version';
+import { IdentityManagementAPIClient } from '../../../grpc/indykite/identity/v1beta1/identity_management_api';
 
 const appCredential = {
   appSpaceId: '696e6479-6b69-4465-8000-010f00000000',
@@ -21,6 +30,19 @@ const appCredential = {
     alg: 'ES256',
   },
 };
+
+class IdentityManagementAPIClientMock extends IdentityManagementAPIClient {
+  endpoint: string;
+  channelCredentials: ChannelCredentials;
+  interceptors: Interceptor[];
+
+  constructor(endpoint: string, channelCredentials: ChannelCredentials, options: ClientOptions) {
+    super('ENDPOINT', credentials.createInsecure());
+    this.endpoint = endpoint;
+    this.channelCredentials = channelCredentials;
+    this.interceptors = options.interceptors ?? [];
+  }
+}
 
 describe('application credentials', () => {
   beforeEach(() => {
@@ -71,23 +93,80 @@ describe('application credentials', () => {
 });
 
 describe('channel credential', () => {
+  const originalNewChannelCredentialsFn = SdkClient['newChannelCredentials'];
   const err = new SdkError(SdkErrorCode.SDK_CODE_1, 'UNKNOWN');
   const staticFunc = jest.fn(() => {
     throw err;
   });
 
-  it('identity instance', () => {
+  beforeEach(() => {
     SdkClient['newChannelCredentials'] = staticFunc;
+  });
+
+  afterEach(() => {
+    SdkClient['newChannelCredentials'] = originalNewChannelCredentialsFn;
+  });
+
+  it('identity instance', () => {
     const sdk = SdkClient.createIdentityInstance(ConfigManagementAPIClient, 'TOKEN', 'ENDPOINT');
     expect(sdk).rejects.toEqual(err);
   });
 
   it('service instance', () => {
-    SdkClient['newChannelCredentials'] = staticFunc;
     const sdk = SdkClient.createServiceInstance(
       ConfigManagementAPIClient,
       JSON.stringify(appCredential),
     );
     expect(sdk).rejects.toEqual(err);
+  });
+});
+
+describe('call credential', () => {
+  let createFromMetadataGeneratorMock: jest.SpyInstance;
+  let createSslMock: jest.SpyInstance;
+
+  beforeEach(() => {
+    createFromMetadataGeneratorMock = jest
+      .spyOn(credentials, 'createFromMetadataGenerator')
+      .mockImplementation();
+    createSslMock = jest.spyOn(credentials, 'createSsl').mockImplementation();
+  });
+
+  afterEach(() => {
+    createFromMetadataGeneratorMock.mockRestore();
+    createSslMock.mockRestore();
+  });
+
+  it('call credentials creation', async () => {
+    try {
+      await SdkClient.createIdentityInstance(ConfigManagementAPIClient, 'TOKEN', 'ENDPOINT');
+    } catch (err) {
+      // The instance can't be created because of invalid configuration,
+      // but that's not a problem for this test.
+    }
+    expect(createFromMetadataGeneratorMock).toBeCalledTimes(1);
+
+    createFromMetadataGeneratorMock.mock.calls[0][0](
+      { service_url: '' },
+      (err: Error | null, metadata: Metadata | null) => {
+        expect(err).toBeNull();
+        expect(metadata?.get('authorization')).toEqual(['Bearer TOKEN']);
+        expect(metadata?.get('iksdk-version')).toEqual([LIB_VERSION]);
+      },
+    );
+  });
+
+  fit('interceptors', async () => {
+    const sdk = await SdkClient.createIdentityInstance(
+      IdentityManagementAPIClientMock,
+      'TOKEN',
+      'ENDPOINT',
+    );
+    const client = sdk.client as IdentityManagementAPIClientMock;
+    expect(client.interceptors).toHaveLength(2);
+    const [credentialsInterceptor, unauthenticatedStatusInterceptor] = client.interceptors;
+    credentialsInterceptor({}, (options) => {
+      
+    });
   });
 });
