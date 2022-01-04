@@ -134,7 +134,7 @@ export class PatchPropertiesBuilder {
   deleteProperty(id: string): PatchPropertiesBuilder {
     this.operations.push(
       PropertyBatchOperation.fromJSON({
-        delete: {
+        remove: {
           id: id,
         },
       }),
