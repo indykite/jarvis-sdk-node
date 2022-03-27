@@ -50,7 +50,7 @@
     "typescript": "^4.3.5"
   },
   "dependencies": {
-    "@grpc/grpc-js": "^1.2.6",
+    "@grpc/grpc-js": "^1.5.7",
     "jose": "^3.11.5",
     "protobufjs": "^6.11.2",
     "uuid": "^8.3.2"
