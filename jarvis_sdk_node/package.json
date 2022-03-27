@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.2.6",
-    "jose": "^3.11.5",
+    "jose": "^3.20.3",
     "protobufjs": "^6.11.2",
     "uuid": "^8.3.2"
   },
