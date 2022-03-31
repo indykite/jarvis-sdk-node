@@ -1,0 +1,20 @@
+version: v1
+managed:
+    enabled: true
+plugins:
+#    - remote: buf.build/protocolbuffers/plugins/js:v3.19.3-1
+#      out: jarvis_sdk_node/src/grpc
+#      opt:
+#          - import_style=commonjs
+#          - binary
+#    - remote: buf.build/grpc/plugins/node:v1.11.2-1
+#      out: jarvis_sdk_node/src/grpc
+#      opt:
+#          - import_style=commonjs
+    - remote: buf.build/timostamm/plugins/protobuf-ts:v2.4.0-1
+      out: jarvis_sdk_node/src/grpc
+      # Doc: https://github.com/timostamm/protobuf-ts/blob/master/MANUAL.md
+      opt:
+        - long_type_string
+        - client_grpc1
+        - generate_dependencies
