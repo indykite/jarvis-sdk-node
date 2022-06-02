@@ -52,7 +52,7 @@
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.6.0",
-    "@protobuf-ts/runtime-rpc": "2.4.0",
+    "@protobuf-ts/runtime-rpc": "2.5.0",
     "@protobuf-ts/runtime": "2.4.0",
     "google-protobuf": "3.13.0",
     "jose": "^4.6.0",
