@@ -54,7 +54,7 @@
     "@grpc/grpc-js": "^1.6.0",
     "@protobuf-ts/runtime-rpc": "2.4.0",
     "@protobuf-ts/runtime": "2.4.0",
-    "google-protobuf": "3.13.0",
+    "google-protobuf": "3.19.4",
     "jose": "^4.6.0",
     "protobufjs": "^6.11.2",
     "uuid": "^8.3.2"
