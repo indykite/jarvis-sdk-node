@@ -1,6 +1,6 @@
 {
   "name": "@indykiteone/jarvis-sdk-node",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "IndyKite Identity Platform JavaScript SDK",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
